@@ -199,7 +199,10 @@
                   (mina-unless-null "--run-snark-worker" mina-snark-worker-key)
                   (mina-unless-null "--archive-address" (mina-optmap 'number-to-string mina-archive-port))
                   (mina-unless-null "--peer-list-url" mina-peerlist-url)
-                  (if mina-sandbox-mode '("--seed" "--demo-mode") nil)))))
+                  (if mina-sandbox-mode '("--seed" "--demo-mode") nil))))
+  (if (get-buffer-window mina-daemon-buffer-name)
+      nil
+    (display-buffer mina-daemon-buffer-name)))
 
 (defun mina-psql-uri ()
   "Return the Postgres URI to connect to."
@@ -232,7 +235,6 @@
    (mina-process "mina-archive"
                  (list mina-archive-bin "run"
                        "--postgres-uri" (mina-psql-uri)
-                       "--config-file" mina-config-file
                        "--server-port" (number-to-string mina-archive-port)))))
 
 (defun mina-rosetta ()
