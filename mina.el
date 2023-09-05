@@ -6,11 +6,12 @@
 (require 'f)
 (require 'sql)
 (require 'direnv)
+(require 'graphql-mode)
 
 (defun mina-work-dir (subdir)
-"Return an absolute path of the SUBDIR in the work directory."
-(let ((home (getenv "HOME")))
-(concat home "/work/" subdir)))
+  "Return an absolute path of the SUBDIR in the work directory."
+  (let ((home (getenv "HOME")))
+    (concat home "/work/" subdir)))
 
 (defun mina-read-work-file (filename)
 "Return the trimmed contents of the FILENAME in the work directory."
@@ -125,6 +126,35 @@
   :type 'string
   :group 'mina)
 
+(defcustom mina-gql-host "localhost"
+  "Mina GraphQL endpoint."
+  :type 'string
+  :group 'mina)
+
+(defcustom mina-gql-port 3085
+    "Mina GraphQL port."
+    :type 'number
+    :group 'mina)
+
+(defcustom mina-rosetta-cli-buffer-name "*mina-rosetta-cli*"
+  "Name of the buffer for mina rosetta-cli output."
+  :type 'string
+  :group 'mina)
+
+(defcustom mina-rosetta-cli-bin (format "%s/go/bin/rosetta-cli" (getenv "HOME"))
+  "Path to the rosetta-cli binary."
+  :type 'file
+  :group 'mina)
+
+(defcustom mina-rosetta-cli-config-file (mina-work-dir "mina-configs/rosetta-cli/config.json")
+  "Mina rosetta-cli config file."
+  :type 'file
+  :group 'mina)
+
+
+(defun mina-gql-endpoint ()
+  "Return the GraphQL endpoint based on current configuration."
+  (format "http://%s:%d/graphql" mina-gql-host mina-gql-port))
 
 (defun mina-process (name cmd)
   "Create an async process NAME running CMD."
@@ -194,7 +224,8 @@
                         mina-libp2p-flag-name mina-daemon-key
                         "--config-directory" mina-config-dir
                         "--config-file" mina-config-file
-                        "--proof-level" mina-proof-level)
+                        "--proof-level" mina-proof-level
+                        "--rest-port" (number-to-string mina-gql-port))
                   (mina-unless-null "--block-producer-key" mina-block-producer-key)
                   (mina-unless-null "--run-snark-worker" mina-snark-worker-key)
                   (mina-unless-null "--archive-address" (mina-optmap 'number-to-string mina-archive-port))
@@ -278,6 +309,42 @@
   "Stop all Mina processes."
   (interactive)
   (mina-stop "mina-daemon" "mina-archive" "mina-rosetta"))
+
+(setq mina-gql-query-blockchain-length "query MyQuery { daemonStatus { blockchainLength } }")
+
+(defun mina-rosetta-current-block ()
+  "Return the current block height from Rosetta."
+  (let ((response (graphql-post-request (mina-gql-endpoint) mina-gql-query-blockchain-length)))
+    (if (not (equal 200 (request-response-status-code response)))
+        nil)
+    (let ((json (request-response-data response)))
+      (cdadr (assoc 'daemonStatus (car json))))))
+
+(defun mina-log-in-buffer (msg &optional buffer)
+  "Log MSG in BUFFER if specified; in *Messages* otherwise."
+  (if buffer
+      (with-current-buffer buffer (insert msg))
+    (message msg)))
+
+(defun mina-wait-for-block (height &optional log-buffer)
+  "Poll Rosetta for the current block until HEIGHT is reached, logging in LOG-BUFFER."
+  (if (> height (mina-rosetta-current-block))
+      (progn (mina-log-in-buffer (format "Waiting for block %s" height) log-buffer))
+    (mina-log-in-buffer (format "Reached block %s" height) log-buffer)))
+
+(defun mina-rosetta-cli (test)
+  "Run Rosetta CLI TEST."
+  (interactive "sTest:")
+  (mina-run-in-buffer
+   mina-rosetta-cli-buffer-name
+   mina-rosetta-cli-bin
+   (mina-process "mina-rosetta-cli"
+                 (list mina-rosetta-cli-bin
+                       "--configuration-file" mina-rosetta-cli-config-file
+                       (format "check:%s" test))))
+  (if (get-buffer-window mina-rosetta-cli-buffer-name)
+      nil
+    (display-buffer mina-rosetta-cli-buffer-name)))
 
 (provide 'mina)
 ;;; mina.el ends here
