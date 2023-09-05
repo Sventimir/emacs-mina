@@ -278,7 +278,7 @@
    (mina-process "mina-rosetta"
                  (list mina-rosetta-bin
                        "--archive-uri" (mina-psql-uri)
-                       "--graphql-uri" "http://localhost:3085/graphql"
+                       "--graphql-uri" (mina-gql-endpoint)
                        "--port" (number-to-string mina-rosetta-port)
                        "--log-level" "debug"))))
 
