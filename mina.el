@@ -1,3 +1,4 @@
+;; -*- lexical-binding: t; -*-
 ;;; package --- Mina Launcher
 ;;; Commentary:
 ;;; Run Mina daemon and client inside Emacs
@@ -174,18 +175,31 @@
       (list flag arg)
     nil))
 
-(defun mina-update-genesis-timestamp (config)
-  "Update the genesis timestamp in the CONFIG file."
-  (interactive "fFilename:")
-    (with-current-buffer (find-file-noselect config)
-      (goto-char 0)
-      (let* ((json (json-parse-buffer))
-             (genesis (gethash "genesis" json)))
-        (puthash "genesis_state_timestamp" (format-time-string "%Y-%m-%dT%H:%M:%S%z") genesis)
-        (erase-buffer)
-        (json-insert json)
-        (json-pretty-print (point-min) (point-max))
-        (save-buffer))))
+(defun mina-set-genesis-timestamp (&optional timestamp)
+  "Set the genesis timestamp to TIMESTAMP (defaults to now)."
+  (lambda (json)
+    (let ((genesis (gethash "genesis" json)))
+      (puthash "genesis_state_timestamp" (or timestamp (format-time-string "%Y-%m-%dT%H:%M:%S%z")) genesis)
+      json)))
+
+(defun mina-set-block-time-window-seconds (time-window)
+  "Set the block time window to TIME-WINDOW expressed in seconds."
+  (lambda (json)
+    (let ((proof (gethash "proof" json))
+          (time (* 1000 time-window)))
+      (puthash "block_window_duration_ms" time proof))))
+
+(defun mina-update-config (config &rest update-funs)
+  "Execute UPDATE-FUNS against the CONFIG file."
+  (with-current-buffer (find-file-noselect config)
+    (goto-char 0)
+    (let* ((json (json-parse-buffer)))
+      (dolist (update update-funs)
+        (funcall update json))
+      (erase-buffer)
+      (json-insert json)
+      (json-pretty-print (point-min) (point-max))
+      (save-buffer))))
 
 (defun mina-optmap (f opt)
   "Map F over OPT."
@@ -215,7 +229,7 @@
    mina-bin
    (delete-directory mina-config-dir t)
    (if mina-sandbox-mode
-       (mina-update-genesis-timestamp mina-config-file)
+       (mina-update-config mina-config-file (mina-set-genesis-timestamp))
      nil)
    (mina-import-keys (mina-work-dir "keys") mina-config-dir)
    (mina-process "mina-daemon"
@@ -308,7 +322,7 @@
 (defun mina-full-stop ()
   "Stop all Mina processes."
   (interactive)
-  (mina-stop "mina-daemon" "mina-archive" "mina-rosetta"))
+  (mina-stop "mina-daemon" "mina-archive" "mina-rosetta" "mina-rosetta-cli"))
 
 (setq mina-gql-query-blockchain-length "query MyQuery { daemonStatus { blockchainLength } }")
 
@@ -334,7 +348,7 @@
 
 (defun mina-rosetta-cli (test)
   "Run Rosetta CLI TEST."
-  (interactive "sTest:")
+  (interactive "sTest: ")
   (mina-run-in-buffer
    mina-rosetta-cli-buffer-name
    mina-rosetta-cli-bin
@@ -345,6 +359,11 @@
   (if (get-buffer-window mina-rosetta-cli-buffer-name)
       nil
     (display-buffer mina-rosetta-cli-buffer-name)))
+
+(defun mina-update-block-time (block-time)
+  "Set block time to BLOCK-TIME in the currently used mina config."
+  (interactive "nBlock time (in seconds): ")
+  (mina-update-config mina-config-file (mina-set-block-time-window-seconds block-time)))
 
 (provide 'mina)
 ;;; mina.el ends here
