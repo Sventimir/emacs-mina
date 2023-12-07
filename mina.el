@@ -60,7 +60,7 @@
 (defcustom mina-proof-level "none"
   "Mina proof level."
   :type 'string
-  :options '("none" "check" "full")
+  :options (mina-optional-type '("none" "check" "full"))
   :group 'mina)
 
 (defcustom mina-peerlist-url nil
@@ -137,6 +137,11 @@
     :type 'number
     :group 'mina)
 
+(defcustom mina-additional-options nil
+  "Additional options to pass to mina."
+  :type '(alist :key-type string :value-type string)
+  :group 'mina)
+
 (defcustom mina-rosetta-cli-buffer-name "*mina-rosetta-cli*"
   "Name of the buffer for mina rosetta-cli output."
   :type 'string
@@ -150,6 +155,11 @@
 (defcustom mina-rosetta-cli-config-file (mina-work-dir "mina-configs/rosetta-cli/config.json")
   "Mina rosetta-cli config file."
   :type 'file
+  :group 'mina)
+
+(defcustom mina-status-buffer-name "*mina-daemon-status*"
+  "Name of the buffer to display mina daemon status in."
+  :type 'string
   :group 'mina)
 
 
@@ -168,6 +178,12 @@
                   "accounts" "import"
                   "--privkey-path" key
                   "--config-directory" to)))
+
+(defun list-bind (f l)
+  "Apply F to each element in L and concat resulting lists."
+  (if (null l)
+      nil
+    (append (funcall f (car l)) (list-bind f (cdr l)))))
 
 (defun mina-unless-null (flag arg)
   "Format a condition checking if ARG is null and prefixing it with FLAG."
@@ -224,30 +240,33 @@
 (defun mina-daemon ()
   "Run Mina daemon."
   (interactive)
+  (let ((mina-cmd (append
+                   (list mina-bin "daemon"
+                         mina-libp2p-flag-name mina-daemon-key
+                         "--config-directory" mina-config-dir
+                         "--config-file" mina-config-file
+                         "--rest-port" (number-to-string mina-gql-port))
+                   (mina-unless-null "--proof-level" mina-proof-level)
+                   (mina-unless-null "--block-producer-key" mina-block-producer-key)
+                   (mina-unless-null "--run-snark-worker" mina-snark-worker-key)
+                   (mina-unless-null "--archive-address" (mina-optmap 'number-to-string mina-archive-port))
+                   (mina-unless-null "--peer-list-url" mina-peerlist-url)
+                   (if mina-sandbox-mode '("--seed" "--demo-mode") nil)
+                   (list-bind (lambda (p) (list (car p) (cdr p))) mina-additional-options))))
   (mina-run-in-buffer
    mina-daemon-buffer-name
    mina-bin
    (delete-directory mina-config-dir t)
    (if mina-sandbox-mode
-       (mina-update-config mina-config-file (mina-set-genesis-timestamp))
+       (progn
+         (mina-update-config mina-config-file (mina-set-genesis-timestamp))
+         (mina-import-keys (mina-work-dir "keys") mina-config-dir))
      nil)
-   (mina-import-keys (mina-work-dir "keys") mina-config-dir)
-   (mina-process "mina-daemon"
-                 (append
-                  (list mina-bin "daemon"
-                        mina-libp2p-flag-name mina-daemon-key
-                        "--config-directory" mina-config-dir
-                        "--config-file" mina-config-file
-                        "--proof-level" mina-proof-level
-                        "--rest-port" (number-to-string mina-gql-port))
-                  (mina-unless-null "--block-producer-key" mina-block-producer-key)
-                  (mina-unless-null "--run-snark-worker" mina-snark-worker-key)
-                  (mina-unless-null "--archive-address" (mina-optmap 'number-to-string mina-archive-port))
-                  (mina-unless-null "--peer-list-url" mina-peerlist-url)
-                  (if mina-sandbox-mode '("--seed" "--demo-mode") nil))))
+   (insert (format "***\nRunning: %s\n***\n" (string-join mina-cmd " ")))
+   (mina-process "mina-daemon" mina-cmd))
   (if (get-buffer-window mina-daemon-buffer-name)
       nil
-    (display-buffer mina-daemon-buffer-name)))
+    (display-buffer mina-daemon-buffer-name))))
 
 (defun mina-psql-uri ()
   "Return the Postgres URI to connect to."
@@ -364,6 +383,34 @@
   "Set block time to BLOCK-TIME in the currently used mina config."
   (interactive "nBlock time (in seconds): ")
   (mina-update-config mina-config-file (mina-set-block-time-window-seconds block-time)))
+
+(defun mina-conf-mainnet ()
+  "Set the mina config to mainnet."
+  (interactive)
+  (setq mina-block-producer-key nil
+        mina-libp2p-flag-name "--discovery-keypair"
+        mina-peerlist-url "https://storage.googleapis.com/seed-lists/mainnet_seeds.txt"
+        mina-config-file (mina-work-dir "mina-configs/mainnet.json")
+        mina-archive-port nil
+        mina-proof-level nil
+        mina-sandbox-mode nil
+        mina-snark-worker-key nil))
+
+(defun mina-daemon-status-update (buffer)
+  "Run mina client status and update the BUFFER."
+  (with-current-buffer buffer (erase-buffer))
+  (call-process mina-bin nil buffer nil "client" "status"))
+
+(defun mina-daemon-status (interval)
+  "Create a process buffer to display the status of the Mina deamon every INTERVAL seconds."
+  (interactive "nInterval (in seconds): ")
+  (switch-to-buffer mina-status-buffer-name)
+  (setq-local mina-status-timer
+              (run-with-timer 0 interval 'mina-daemon-status-update (current-buffer)))
+  (add-hook 'kill-buffer-hook
+            (lambda ()
+              (when (and (boundp 'mina-status-timer) (timerp mina-status-timer))
+                (cancel-timer mina-status-timer)))))
 
 (provide 'mina)
 ;;; mina.el ends here
