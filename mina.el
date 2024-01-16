@@ -97,6 +97,11 @@
   :type 'string
   :group 'mina)
 
+(defcustom mina-archive-db-password nil
+  "Password for the mina archive to log in to Postgres."
+  :type (mina-optional-type 'string)
+  :group 'mina)
+
 (defcustom mina-archive-db-host "localhost"
   "Host for the mina archive to connect to Postgres."
   :type 'string
@@ -270,8 +275,9 @@
 
 (defun mina-psql-uri ()
   "Return the Postgres URI to connect to."
-  (format "postgres://%s@%s:%s/%s"
+  (format "postgres://%s%s@%s:%s/%s"
            mina-archive-db-user
+           (if mina-archive-db-password (concat ":" mina-archive-db-password) "")
            mina-archive-db-host
            mina-archive-db-port
            mina-archive-db-name))
@@ -290,12 +296,14 @@
   (mina-run-in-buffer
    mina-archive-buffer-name
    mina-archive-bin
-   (mina-archive-psql "-d" "postgres"
-                      "-c" (format "DROP DATABASE %s;" mina-archive-db-name))
-   (mina-archive-psql "-d" "postgres"
-                      "-c" (format "CREATE DATABASE %s;" mina-archive-db-name))
-   (mina-archive-psql "-d" mina-archive-db-name
-                      "-f" (mina-work-dir "mina/src/app/archive/create_schema.sql"))
+   (if mina-sandbox-mode
+       (progn
+         (mina-archive-psql "-d" "postgres"
+                            "-c" (format "DROP DATABASE %s;" mina-archive-db-name))
+         (mina-archive-psql "-d" "postgres"
+                            "-c" (format "CREATE DATABASE %s;" mina-archive-db-name))
+         (mina-archive-psql "-d" mina-archive-db-name
+                            "-f" (mina-work-dir "mina/src/app/archive/create_schema.sql"))))
    (mina-process "mina-archive"
                  (list mina-archive-bin "run"
                        "--postgres-uri" (mina-psql-uri)
