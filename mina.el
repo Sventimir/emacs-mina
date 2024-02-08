@@ -257,7 +257,11 @@
                    (mina-unless-null "--archive-address" (mina-optmap 'number-to-string mina-archive-port))
                    (mina-unless-null "--peer-list-url" mina-peerlist-url)
                    (if mina-sandbox-mode '("--seed" "--demo-mode") nil)
-                   (list-bind (lambda (p) (list (car p) (cdr p))) mina-additional-options))))
+                   (list-bind (lambda (p)
+                                (if (string= (cdr p) "")
+                                    (list (car p))
+                                  (list (car p) (cdr p))))
+                              mina-additional-options))))
   (mina-run-in-buffer
    mina-daemon-buffer-name
    mina-bin
